@@ -1,0 +1,42 @@
+// 1. Importa o shapefile/asset do município (substitua pelo ID do seu asset)
+var sorocaba = ee.FeatureCollection("projects/bold-syntax-466319-b9/assets/Sorocaba");
+
+// 2. Define o intervalo de datas
+var inicio = '2024-12-01';
+var fim = '2025-03-30';
+
+// 3. Carrega a coleção Landsat 8/9 SR (Surface Reflectance)
+var landsat = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+  .filterBounds(sorocaba)
+  .filterDate(inicio, fim)
+  .map(function(image){
+    // Correção de escala das bandas de reflectância (multiplicar por fator de escala 0.0000275 e adicionar offset -0.2)
+    var reflect = image.select(['SR_B.*'])
+      .multiply(0.0000275)
+      .add(-0.2);
+    
+    // Substitui as bandas corrigidas
+    image = image.addBands(reflect, null, true);
+
+    // Calcula NDVI: (NIR - RED) / (NIR + RED)
+    var ndvi = image.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI');
+    
+    return image.addBands(ndvi);
+  });
+
+// 4. Gera a mediana do NDVI no período
+var ndviMediana = landsat.select('NDVI').median().clip(sorocaba);
+
+// 5. Visualização
+Map.centerObject(sorocaba, 11);
+Map.addLayer(ndviMediana, {min: 0, max: 1, palette: ['white','green']}, 'NDVI Mediana');
+
+// 6. Exporta o resultado para Google Drive
+Export.image.toDrive({
+  image: ndviMediana,
+  description: 'NDVI_Landsat_Sorocaba_20241201_20250530',
+  scale: 30,  // resolução nativa
+  region: sorocaba.geometry(),
+  crs: 'EPSG:4326',
+  maxPixels: 1e13
+});
