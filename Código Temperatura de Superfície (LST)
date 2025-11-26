@@ -1,0 +1,63 @@
+// === 1) Seu município (substitua pelo seu asset) ===
+var sorocaba = ee.FeatureCollection('projects/bold-syntax-466319-b9/assets/Sorocaba').geometry();
+
+// === 2) Intervalo de datas ===
+var inicio = '2024-12-01';
+var fim    = '2025-03-30';
+
+// === 3) Função de máscara de nuvens (Landsat L2) ===
+function maskL2(img) {
+  var qa = img.select('QA_PIXEL');
+  var cloud       = qa.bitwiseAnd(1 << 3).neq(0);
+  var cloudShadow = qa.bitwiseAnd(1 << 4).neq(0);
+  var snow        = qa.bitwiseAnd(1 << 5).neq(0);
+  var cirrus      = qa.bitwiseAnd(1 << 2).neq(0);
+  var mask = cloud.or(cloudShadow).or(snow).or(cirrus).not();
+  return img.updateMask(mask);
+}
+
+// === 4) Converte ST_B10 (Kelvin) para Celsius ===
+function addLST(img) {
+  var lstC = img.select('ST_B10')
+                .multiply(0.00341802)
+                .add(149.0)
+                .subtract(273.15)
+                .rename('LST_C');
+  return img.addBands(lstC)
+            .copyProperties(img, ['system:time_start']);
+}
+
+// === 5) Carrega Landsat 8 e 9, filtra, mascara e adiciona LST ===
+var l8 = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+  .filterBounds(sorocaba)
+  .filterDate(inicio, fim)
+  .map(maskL2)
+  .map(addLST);
+
+var l9 = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2')
+  .filterBounds(sorocaba)
+  .filterDate(inicio, fim)
+  .map(maskL2)
+  .map(addLST);
+
+// === 6) Mediana da LST no período ===
+var lstMediana = l8.merge(l9).select('LST_C').median().clip(sorocaba);
+
+// === 7) Visualização ===
+var vizParams = {
+  min: 15,
+  max: 45,
+  palette: ['blue','cyan','green','yellow','orange','red']
+};
+
+Map.centerObject(sorocaba, 10);
+Map.addLayer(lstMediana, vizParams, 'LST Mediana (°C) - 2024-12 a 2025-03');
+
+// === 8) Exporta para o Drive ===
+Export.image.toDrive({
+  image: lstMediana,
+  description: 'LST_Mediana_Landsat_Sorocaba_2024-12_2025-03',
+  scale: 30,
+  region: sorocaba,
+  maxPixels: 1e13,
+  fileFormat: 'GeoTIFF 
