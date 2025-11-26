@@ -1,0 +1,41 @@
+// 1. Importa o shapefile/asset do município (substitua pelo ID do seu asset)
+var sorocaba = ee.FeatureCollection("projects/bold-syntax-466319-b9/assets/Sorocaba");
+
+// 2. Define o intervalo de datas
+var inicio = '2024-12-01';
+var fim = '2025-03-30';
+
+// 3. Carrega a coleção Landsat 8/9 SR (Surface Reflectance)
+var landsat = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+  .filterBounds(sorocaba)
+  .filterDate(inicio, fim)
+  .map(function(image){
+    // Corrige reflectância (escala * 0.0000275 + offset -0.2)
+    var reflect = image.select(['SR_B.*'])
+      .multiply(0.0000275)
+      .add(-0.2);
+    
+    image = image.addBands(reflect, null, true);
+
+    // Calcula NDBI = (SWIR1 - NIR) / (SWIR1 + NIR)
+    var ndbi = image.normalizedDifference(['SR_B6', 'SR_B5']).rename('NDBI');
+    
+    return image.addBands(ndbi);
+  });
+
+// 4. Gera a mediana do NDBI no período
+var ndbiMediana = landsat.select('NDBI').median().clip(sorocaba);
+
+// 5. Visualização
+Map.centerObject(sorocaba, 11);
+Map.addLayer(ndbiMediana, {min: -1, max: 1, palette: ['blue','white','brown']}, 'NDBI Mediana');
+
+// 6. Exporta o resultado para Google Drive
+Export.image.toDrive({
+  image: ndbiMediana,
+  description: 'NDBI_Landsat_Sorocaba_20241201_20250530',
+  scale: 30,  // resolução nativa Landsat
+  region: sorocaba.geometry(),
+  crs: 'EPSG:4326',
+  maxPixels: 1e13
+});
